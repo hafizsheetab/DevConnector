@@ -1,57 +1,80 @@
-const express = require('express')
-const router = express.Router()
-const auth = require('../../Middleware/auth')
-const jwt = require('jsonwebtoken')
-const {check, validationResult} = require('express-validator')
-const bcrypt = require('bcryptjs')
-const User = require('../../models/User')
-const config = require('config')
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
+const auth = require('../../middleware/auth');
+const jwt = require('jsonwebtoken');
+const config = require('config');
+const { check, validationResult } = require('express-validator');
 
-router.get('/',auth, async(req,res) => {
-    let user = await User.findById(req.user.user.id)
-    if(!user){
-        return res.status(400).json({msg: 'userNotFound'})
+const User = require('../../models/User');
+
+// @route    GET api/auth
+// @desc     Get user by token
+// @access   Private
+router.get('/', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route    POST api/auth
+// @desc     Authenticate user & get token
+// @access   Public
+router.post(
+  '/',
+  [
+    check('email', 'Please include a valid email').isEmail(),
+    check('password', 'Password is required').exists()
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
     }
 
-    res.send(user)
+    const { email, password } = req.body;
 
-})
-router.post('/',[
-    check('email','Give Valid email').isEmail(),
-    check('password','Give more than 6 characters').isLength(6)
-],async (req,res) => {
-  
-   try{
-        const errors = validationResult(req);
-        if(!errors.isEmpty()){
-            return res.status(400).json({errors:errors.array()})
-        }
-        let {email, password} = req.body
-        let user = await User.findOne({email})
-        if(!user){
-            return res.status(400).json({errors:{message: 'Invalid Credentials'}})
-        }
-        const isMatch = await bcrypt.compare(password,user.password)
-        if(!isMatch){
-            return res.status(400).json({errors:{message: 'Invalid Credentials'}})
-        }
-        const payload = {
-            user: {
-                id: user.id
-            }
-        }
-        jwt.sign(payload,config.get('jwtSecret'),{expiresIn:360000},(err,token) =>{
-            if(err) throw err
-            res.json({token})
-        })
-        
+    try {
+      let user = await User.findOne({ email });
 
-   }
-   catch(error){
-       console.error(error.message)
-       res.status(500).send('Server Error')
-   }
-  
-})
+      if (!user) {
+        return res
+          .status(400)
+          .json({ errors: [{ msg: 'Invalid Credentials' }] });
+      }
 
-module.exports = router
+      const isMatch = await bcrypt.compare(password, user.password);
+
+      if (!isMatch) {
+        return res
+          .status(400)
+          .json({ errors: [{ msg: 'Invalid Credentials' }] });
+      }
+
+      const payload = {
+        user: {
+          id: user.id
+        }
+      };
+
+      jwt.sign(
+        payload,
+        config.get('jwtSecret'),
+        { expiresIn: '5 days' },
+        (err, token) => {
+          if (err) throw err;
+          res.json({ token });
+        }
+      );
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).send('Server error');
+    }
+  }
+);
+
+module.exports = router;
